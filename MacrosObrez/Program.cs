@@ -18,8 +18,16 @@ class MacrosObrez
     private const int KEYEVENTF_KEYUP = 0x0002;
     private const int VK_SPACE = 0x20;
     
+    // Константы для настройки макроса
+    private const int TARGET_X = 200;
+    private const int TARGET_Y = 200;
+    private const int DELAY_BETWEEN_CLICKS_MS = 150;
+    private const int CLICK_HOLD_DELAY_MS = 10;
+    
     private static IntPtr hookHandle = IntPtr.Zero;
     private static LowLevelMouseProc mouseProc = HookCallback;
+    private static bool isMacroRunning = false;
+    private static readonly object macroLock = new object();
     
     // Структуры для работы с хуками
     [StructLayout(LayoutKind.Sequential)]
@@ -73,12 +81,40 @@ class MacrosObrez
         Console.WriteLine("MacrosObrez запущен. Нажмите Mouse7 для выполнения макроса.");
         Console.WriteLine("Нажмите Ctrl+C для выхода.");
         
+        // Установка обработчика Ctrl+C для корректного завершения
+        Console.CancelKeyPress += (sender, e) =>
+        {
+            e.Cancel = true;
+            Console.WriteLine("\nЗавершение работы...");
+            Cleanup();
+            Environment.Exit(0);
+        };
+        
         hookHandle = SetHook(mouseProc);
+        
+        if (hookHandle == IntPtr.Zero)
+        {
+            Console.WriteLine("ОШИБКА: Не удалось установить хук мыши!");
+            Console.WriteLine("Убедитесь, что приложение запущено с правами администратора.");
+            return;
+        }
+        
+        Console.WriteLine("Хук успешно установлен. Ожидание нажатия Mouse7...");
         
         // Ожидание завершения
         Application.Run();
         
-        UnhookWindowsHookEx(hookHandle);
+        Cleanup();
+    }
+    
+    private static void Cleanup()
+    {
+        if (hookHandle != IntPtr.Zero)
+        {
+            UnhookWindowsHookEx(hookHandle);
+            hookHandle = IntPtr.Zero;
+            Console.WriteLine("Хук удален.");
+        }
     }
     
     private static IntPtr SetHook(LowLevelMouseProc proc)
@@ -114,6 +150,17 @@ class MacrosObrez
     
     private static void ExecuteMacro()
     {
+        // Проверяем, не выполняется ли уже макрос
+        lock (macroLock)
+        {
+            if (isMacroRunning)
+            {
+                Console.WriteLine("Макрос уже выполняется, ожидайте завершения...");
+                return;
+            }
+            isMacroRunning = true;
+        }
+        
         // Запускаем макрос в отдельном потоке, чтобы не блокировать хук
         Thread macroThread = new Thread(() =>
         {
@@ -128,7 +175,7 @@ class MacrosObrez
                 Console.WriteLine("Клик 1");
                 
                 // 3. Подождать 0.15 секунды
-                Thread.Sleep(150);
+                Thread.Sleep(DELAY_BETWEEN_CLICKS_MS);
                 
                 // 4. Нажать левую кнопку мыши
                 ClickLeftMouse();
@@ -139,8 +186,8 @@ class MacrosObrez
                 Console.WriteLine("Пробел нажат");
                 
                 // 6. Передвинуть мышку на 200, 200
-                SetCursorPos(200, 200);
-                Console.WriteLine("Мышь перемещена на (200, 200)");
+                SetCursorPos(TARGET_X, TARGET_Y);
+                Console.WriteLine($"Мышь перемещена на ({TARGET_X}, {TARGET_Y})");
                 
                 // 7. Нажать левую кнопку мыши
                 ClickLeftMouse();
@@ -156,6 +203,13 @@ class MacrosObrez
             {
                 Console.WriteLine($"Ошибка при выполнении макроса: {ex.Message}");
             }
+            finally
+            {
+                lock (macroLock)
+                {
+                    isMacroRunning = false;
+                }
+            }
         });
         
         macroThread.Start();
@@ -164,14 +218,14 @@ class MacrosObrez
     private static void ClickLeftMouse()
     {
         mouse_event(MOUSEEVENTF_LEFTDOWN, 0, 0, 0, 0);
-        Thread.Sleep(10); // Небольшая задержка между нажатием и отпусканием
+        Thread.Sleep(CLICK_HOLD_DELAY_MS); // Небольшая задержка между нажатием и отпусканием
         mouse_event(MOUSEEVENTF_LEFTUP, 0, 0, 0, 0);
     }
     
     private static void PressSpace()
     {
         keybd_event(VK_SPACE, 0, KEYEVENTF_KEYDOWN, 0);
-        Thread.Sleep(10); // Небольшая задержка между нажатием и отпусканием
+        Thread.Sleep(CLICK_HOLD_DELAY_MS); // Небольшая задержка между нажатием и отпусканием
         keybd_event(VK_SPACE, 0, KEYEVENTF_KEYUP, 0);
     }
     
